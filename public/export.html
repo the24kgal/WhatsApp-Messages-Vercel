@@ -3,14 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>📥 Export WhatsApp Contacts</title>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&display=swap" rel="stylesheet">
+    <title>📥 WhatsApp Contacts & Segregation Hub</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
     <style>
       * {
         margin: 0;
         padding: 0;
         box-sizing: border-box;
-        font-family: 'Plus Jakarta Sans', sans-serif;
+        font-family: "Plus Jakarta Sans", sans-serif;
       }
 
       body {
@@ -18,274 +21,533 @@
         min-height: 100vh;
         display: flex;
         justify-content: center;
-        align-items: center;
-        padding: 20px;
+        align-items: flex-start;
+        padding: 30px 20px;
       }
 
       .container {
         background: white;
         border-radius: 20px;
-        padding: 40px;
-        max-width: 600px;
+        padding: 35px;
+        max-width: 720px;
         width: 100%;
         box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
       }
 
       h1 {
-        color: #333;
-        margin-bottom: 10px;
-        font-size: 28px;
+        color: #1e293b;
+        margin-bottom: 8px;
+        font-size: 26px;
         text-align: center;
       }
 
       .subtitle {
-        color: #666;
+        color: #64748b;
         text-align: center;
-        margin-bottom: 30px;
+        margin-bottom: 25px;
         font-size: 14px;
       }
 
-      .filter-group {
-        margin-bottom: 20px;
-        padding: 15px;
-        background: #f8f9fa;
-        border-radius: 10px;
+      .emoji {
+        font-size: 42px;
+        text-align: center;
+        margin-bottom: 10px;
       }
 
-      .filter-group label {
+      /* Sync Card */
+      .card {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 20px;
+      }
+
+      .card-title {
+        font-size: 16px;
+        font-weight: 700;
+        color: #0f172a;
+        margin-bottom: 8px;
         display: flex;
         align-items: center;
-        cursor: pointer;
-        margin-bottom: 10px;
-        font-size: 16px;
-        color: #333;
+        gap: 8px;
       }
 
-      .filter-group label:last-child {
-        margin-bottom: 0;
-      }
-
-      input[type="checkbox"] {
-        width: 20px;
-        height: 20px;
-        margin-right: 10px;
-        cursor: pointer;
-        accent-color: #667eea;
-      }
-
-      .description {
+      .card-desc {
         font-size: 13px;
-        color: #666;
-        margin-left: 30px;
-        margin-top: -5px;
-        margin-bottom: 10px;
+        color: #64748b;
+        margin-bottom: 15px;
+        line-height: 1.5;
       }
 
-      .download-btn {
+      .btn {
         width: 100%;
-        padding: 15px;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 13px;
         color: white;
         border: none;
         border-radius: 10px;
-        font-size: 18px;
-        font-weight: bold;
+        font-size: 15px;
+        font-weight: 600;
         cursor: pointer;
-        transition: transform 0.2s, box-shadow 0.2s;
+        transition: transform 0.15s, opacity 0.15s;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .btn:hover {
+        opacity: 0.95;
+        transform: translateY(-1px);
+      }
+
+      .btn:disabled {
+        background: #94a3b8 !important;
+        cursor: not-allowed;
+        transform: none;
+        opacity: 0.7;
+      }
+
+      .btn-sync {
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+      }
+
+      .btn-download {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      }
+
+      /* Progress Bar */
+      .progress-container {
+        display: none;
+        margin-top: 15px;
+      }
+
+      .progress-bar-bg {
+        background: #e2e8f0;
+        border-radius: 8px;
+        height: 12px;
+        overflow: hidden;
+      }
+
+      .progress-bar-fill {
+        background: #10b981;
+        height: 100%;
+        width: 0%;
+        transition: width 0.3s ease;
+      }
+
+      .progress-text {
+        font-size: 12px;
+        color: #475569;
+        margin-top: 6px;
+        display: flex;
+        justify-content: space-between;
+      }
+
+      /* Stats Grid */
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+        gap: 10px;
+        margin-top: 15px;
+      }
+
+      .stat-box {
+        background: white;
+        border: 1px solid #e2e8f0;
+        padding: 12px;
+        border-radius: 8px;
+        text-align: center;
+      }
+
+      .stat-val {
+        font-size: 20px;
+        font-weight: 700;
+        color: #1e293b;
+      }
+
+      .stat-lbl {
+        font-size: 11px;
+        color: #64748b;
+        margin-top: 2px;
+        text-transform: uppercase;
+      }
+
+      /* Filter Grid */
+      .filter-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-bottom: 15px;
+      }
+
+      @media (max-width: 600px) {
+        .filter-row {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .input-group label {
+        display: block;
+        font-size: 13px;
+        font-weight: 600;
+        color: #334155;
+        margin-bottom: 6px;
+      }
+
+      .select-input, .text-input {
+        width: 100%;
+        padding: 10px;
+        border-radius: 8px;
+        border: 1px solid #cbd5e1;
+        font-size: 14px;
+        background: white;
+        color: #1e293b;
+      }
+
+      .make-box {
+        background: #eff6ff;
+        border: 1px solid #bfdbfe;
+        border-radius: 10px;
+        padding: 15px;
         margin-top: 20px;
       }
 
-      .download-btn:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+      .make-title {
+        font-weight: 700;
+        font-size: 14px;
+        color: #1e40af;
+        margin-bottom: 6px;
       }
 
-      .download-btn:active {
-        transform: translateY(0);
+      .make-code {
+        background: white;
+        padding: 10px;
+        border-radius: 6px;
+        font-family: monospace;
+        font-size: 12px;
+        color: #1e293b;
+        word-break: break-all;
+        border: 1px solid #cbd5e1;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
       }
 
-      .download-btn:disabled {
-        background: #ccc;
-        cursor: not-allowed;
-        transform: none;
+      .copy-btn {
+        background: #2563eb;
+        color: white;
+        border: none;
+        padding: 6px 12px;
+        border-radius: 6px;
+        font-size: 12px;
+        cursor: pointer;
+        white-space: nowrap;
       }
 
       .status {
-        margin-top: 20px;
-        padding: 15px;
-        border-radius: 10px;
+        margin-top: 15px;
+        padding: 12px;
+        border-radius: 8px;
         text-align: center;
-        font-size: 14px;
+        font-size: 13px;
         display: none;
       }
 
       .status.success {
-        background: #d4edda;
-        color: #155724;
-        border: 1px solid #c3e6cb;
+        background: #d1fae5;
+        color: #065f46;
+        border: 1px solid #a7f3d0;
         display: block;
       }
 
       .status.error {
-        background: #f8d7da;
-        color: #721c24;
-        border: 1px solid #f5c6cb;
+        background: #fee2e2;
+        color: #991b1b;
+        border: 1px solid #fecaca;
         display: block;
       }
 
       .status.info {
-        background: #d1ecf1;
-        color: #0c5460;
-        border: 1px solid #bee5eb;
+        background: #e0f2fe;
+        color: #075985;
+        border: 1px solid #bae6fd;
         display: block;
-      }
-
-      .recommendation {
-        background: #fff3cd;
-        border: 1px solid #ffeaa7;
-        padding: 15px;
-        border-radius: 10px;
-        margin-bottom: 20px;
-        font-size: 14px;
-        color: #856404;
-      }
-
-      .recommendation strong {
-        color: #d68910;
-      }
-
-      .footer {
-        margin-top: 30px;
-        text-align: center;
-        color: #666;
-        font-size: 12px;
-      }
-
-      .emoji {
-        font-size: 48px;
-        text-align: center;
-        margin-bottom: 20px;
       }
     </style>
   </head>
   <body>
     <div class="container">
-      <div class="emoji">📥</div>
-      <h1>Export WhatsApp Contacts</h1>
-      <p class="subtitle">Download your contacts as CSV file</p>
+      <div class="emoji">📇</div>
+      <h1>WhatsApp Contacts & Segregation Hub</h1>
+      <p class="subtitle">
+        Batch sync 3,000+ contacts, groups & communities to MongoDB without timeouts
+      </p>
 
-      <div class="recommendation">
-        <strong>💡 Recommendation:</strong> Enable "Saved Contacts Only" to
-        filter out fake/spam contacts!
+      <!-- Sync Card -->
+      <div class="card">
+        <div class="card-title">🔄 Step 1: Batch Sync to Database</div>
+        <div class="card-desc">
+          Extracts all saved and unsaved contacts, group participants, and community chats
+          in safe lightweight batches, segregates by location and business, and saves to MongoDB.
+        </div>
+        <button id="syncBtn" class="btn btn-sync" onclick="startSync()">
+          🚀 Run Fast Batch Sync (3000+ Contacts)
+        </button>
+
+        <div id="progressContainer" class="progress-container">
+          <div class="progress-bar-bg">
+            <div id="progressBar" class="progress-bar-fill"></div>
+          </div>
+          <div class="progress-text">
+            <span id="progressPhase">Preparing...</span>
+            <span id="progressPercent">0%</span>
+          </div>
+        </div>
+
+        <div id="statsGrid" class="stats-grid" style="display: none;">
+          <div class="stat-box">
+            <div id="statTotal" class="stat-val">0</div>
+            <div class="stat-lbl">Total Contacts</div>
+          </div>
+          <div class="stat-box">
+            <div id="statBusiness" class="stat-val" style="color: #2563eb;">0</div>
+            <div class="stat-lbl">💼 Business</div>
+          </div>
+          <div class="stat-box">
+            <div id="statSaved" class="stat-val" style="color: #10b981;">0</div>
+            <div class="stat-lbl">⭐ Saved</div>
+          </div>
+          <div class="stat-box">
+            <div id="statGroups" class="stat-val" style="color: #7c3aed;">0</div>
+            <div class="stat-lbl">👥 Groups</div>
+          </div>
+          <div class="stat-box">
+            <div id="statCountries" class="stat-val" style="color: #f59e0b;">0</div>
+            <div class="stat-lbl">🌍 Countries</div>
+          </div>
+        </div>
       </div>
 
-      <div class="filter-group">
-        <label>
-          <input type="checkbox" id="savedOnly" checked />
-          <span>⭐ Saved Contacts Only (Recommended)</span>
-        </label>
-        <div class="description">
-          Only include contacts saved in your phone. Filters out fake/spam
-          contacts.
+      <!-- Export Card -->
+      <div class="card">
+        <div class="card-title">📥 Step 2: Segregate & Export CSV</div>
+        <div class="card-desc">
+          Export filtered contacts directly from MongoDB. Zero timeout, Excel-formatted phone numbers.
         </div>
 
-        <label>
-          <input type="checkbox" id="excludeUnknown" />
-          <span>🚫 Exclude "Unknown" Names</span>
-        </label>
-        <div class="description">
-          Skip contacts without proper names (labeled as "Unknown").
+        <div class="filter-row">
+          <div class="input-group">
+            <label>Contact Type</label>
+            <select id="typeFilter" class="select-input">
+              <option value="all">All (Individuals, Groups & Communities)</option>
+              <option value="individual" selected>Individuals Only</option>
+              <option value="group">Groups Only</option>
+              <option value="community">Communities Only</option>
+            </select>
+          </div>
+
+          <div class="input-group">
+            <label>Business Status</label>
+            <select id="businessFilter" class="select-input">
+              <option value="">All (Business & Regular)</option>
+              <option value="true">💼 WhatsApp Business Only</option>
+              <option value="false">👤 Regular Accounts Only</option>
+            </select>
+          </div>
         </div>
 
-        <label>
-          <input type="checkbox" id="validateNumber" checked />
-          <span>✅ Validate Phone Numbers</span>
-        </label>
-        <div class="description">
-          Only include valid phone numbers (7-15 digits). Recommended to keep
-          enabled.
+        <div class="filter-row">
+          <div class="input-group">
+            <label>Saved Status</label>
+            <select id="savedFilter" class="select-input">
+              <option value="">All (Saved & Unsaved)</option>
+              <option value="true">⭐ Saved Contacts Only</option>
+              <option value="false">❓ Unsaved Leads Only</option>
+            </select>
+          </div>
+
+          <div class="input-group">
+            <label>Country / Location Filter</label>
+            <input
+              type="text"
+              id="countryFilter"
+              class="text-input"
+              placeholder="e.g. Pakistan, United States, or PK"
+            />
+          </div>
         </div>
+
+        <button class="btn btn-download" onclick="downloadContacts()">
+          📥 Download Filtered CSV File
+        </button>
       </div>
 
-      <button class="download-btn" onclick="downloadContacts()">
-        📥 Download CSV File
-      </button>
+      <!-- Make.com & Google Sheets Integration Box -->
+      <div class="make-box">
+        <div class="make-title">🔗 Make.com & Google Sheets Webhook URL</div>
+        <div class="card-desc" style="margin-bottom: 8px;">
+          Use this URL in Make.com's <strong>HTTP "Make a request"</strong> module to automatically sync contacts to Google Sheets without timeouts:
+        </div>
+        <div class="make-code">
+          <span id="makeUrl">https://your-domain.com/contacts/database?format=sheets&limit=1000</span>
+          <button class="copy-btn" onclick="copyMakeUrl()">Copy URL</button>
+        </div>
+      </div>
 
       <div id="status" class="status"></div>
-
-      <div class="footer">
-        The file will be saved as: whatsapp_contacts_[timestamp].csv<br />
-        You can open it in Excel, Google Sheets, or any spreadsheet app.
-      </div>
     </div>
 
     <script>
+      let syncPollInterval = null;
+
+      // Update Make URL based on current origin
+      window.addEventListener("DOMContentLoaded", () => {
+        const origin = window.location.origin;
+        document.getElementById("makeUrl").textContent = `${origin}/contacts/database?format=sheets&limit=1000`;
+        loadExistingSegregation();
+      });
+
+      async function loadExistingSegregation() {
+        try {
+          const res = await fetch("/contacts/segregation");
+          const data = await res.json();
+          if (data.success && data.summary && data.summary.total > 0) {
+            document.getElementById("statsGrid").style.display = "grid";
+            document.getElementById("statTotal").textContent = data.summary.total;
+            document.getElementById("statBusiness").textContent = data.summary.business.businessCount;
+            document.getElementById("statSaved").textContent = data.summary.savedStatus.saved;
+            document.getElementById("statGroups").textContent = data.summary.types.groups + data.summary.types.communities;
+            document.getElementById("statCountries").textContent = (data.byLocation || []).length;
+          }
+        } catch (e) {}
+      }
+
+      async function startSync() {
+        const syncBtn = document.getElementById("syncBtn");
+        const progressContainer = document.getElementById("progressContainer");
+        const progressBar = document.getElementById("progressBar");
+        const progressPhase = document.getElementById("progressPhase");
+        const progressPercent = document.getElementById("progressPercent");
+        const statusDiv = document.getElementById("status");
+
+        syncBtn.disabled = true;
+        syncBtn.innerHTML = "⏳ Syncing in background...";
+        progressContainer.style.display = "block";
+        progressBar.style.width = "5%";
+        progressPhase.textContent = "Initiating batch sync...";
+        progressPercent.textContent = "5%";
+
+        try {
+          const res = await fetch("/contacts/sync", { method: "POST" });
+          const data = await res.json();
+
+          if (!res.ok && res.status !== 409 && res.status !== 202) {
+            throw new Error(data.message || data.error || "Failed to start sync");
+          }
+
+          // Start polling status
+          if (syncPollInterval) clearInterval(syncPollInterval);
+          syncPollInterval = setInterval(pollSyncStatus, 1500);
+        } catch (err) {
+          statusDiv.className = "status error";
+          statusDiv.textContent = `❌ Sync failed: ${err.message}`;
+          syncBtn.disabled = false;
+          syncBtn.innerHTML = "🚀 Run Fast Batch Sync (3000+ Contacts)";
+        }
+      }
+
+      async function pollSyncStatus() {
+        try {
+          const res = await fetch("/contacts/sync/status");
+          const json = await res.json();
+          const state = json.data;
+
+          if (!state) return;
+
+          const progressBar = document.getElementById("progressBar");
+          const progressPhase = document.getElementById("progressPhase");
+          const progressPercent = document.getElementById("progressPercent");
+          const syncBtn = document.getElementById("syncBtn");
+          const statusDiv = document.getElementById("status");
+
+          const pct = state.progress.percentage || 0;
+          progressBar.style.width = `${pct}%`;
+          progressPercent.textContent = `${pct}%`;
+
+          const phaseNames = {
+            extracting_contacts: `Extracting contacts (${state.progress.totalContactsFound} found)...`,
+            extracting_chats: `Extracting chats & groups (${state.progress.totalChatsFound} found)...`,
+            processing_and_segregating: "Segregating location & business details...",
+            saving_to_mongodb: `Saving to database (${state.progress.processed} processed)...`,
+            completed: "Completed!",
+          };
+
+          progressPhase.textContent = phaseNames[state.progress.phase] || state.progress.phase;
+
+          if (state.status === "completed") {
+            clearInterval(syncPollInterval);
+            syncPollInterval = null;
+            syncBtn.disabled = false;
+            syncBtn.innerHTML = "✅ Sync Completed! Run Again";
+            statusDiv.className = "status success";
+            statusDiv.textContent = `✅ Successfully synchronized ${state.summary?.totalFound || "all"} items into database!`;
+
+            loadExistingSegregation();
+          } else if (state.status === "failed") {
+            clearInterval(syncPollInterval);
+            syncPollInterval = null;
+            syncBtn.disabled = false;
+            syncBtn.innerHTML = "🚀 Run Fast Batch Sync";
+            statusDiv.className = "status error";
+            statusDiv.textContent = `❌ Sync error: ${state.error}`;
+          }
+        } catch (e) {
+          console.error("Polling error:", e);
+        }
+      }
+
       function downloadContacts() {
-        const savedOnly = document.getElementById("savedOnly").checked;
-        const excludeUnknown =
-          document.getElementById("excludeUnknown").checked;
-        const validateNumber =
-          document.getElementById("validateNumber").checked;
+        const type = document.getElementById("typeFilter").value;
+        const isBusiness = document.getElementById("businessFilter").value;
+        const isSaved = document.getElementById("savedFilter").value;
+        const country = document.getElementById("countryFilter").value.trim();
+
+        const params = new URLSearchParams();
+        if (type && type !== "all") params.append("type", type);
+        if (isBusiness) params.append("isBusiness", isBusiness);
+        if (isSaved) params.append("isSaved", isSaved);
+        if (country) params.append("country", country);
+
+        const url = `/contacts/export?${params.toString()}`;
 
         const statusDiv = document.getElementById("status");
-        const downloadBtn = document.querySelector(".download-btn");
-
-        // Build URL with query parameters
-        const params = new URLSearchParams();
-        if (savedOnly) params.append("savedOnly", "true");
-        if (excludeUnknown) params.append("excludeUnknown", "true");
-        if (!validateNumber) params.append("validateNumber", "false");
-
-        const url = `/contacts/export${
-          params.toString() ? "?" + params.toString() : ""
-        }`;
-
-        // Show loading status
         statusDiv.className = "status info";
-        statusDiv.textContent = "⏳ Preparing your CSV file...";
-        downloadBtn.disabled = true;
-        downloadBtn.textContent = "⏳ Downloading...";
+        statusDiv.textContent = "⏳ Preparing CSV export...";
 
-        // Create a temporary link and trigger download
         const link = document.createElement("a");
         link.href = url;
-        link.download = ""; // Browser will use filename from server
+        link.download = "";
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
 
-        // Show success after a short delay
         setTimeout(() => {
           statusDiv.className = "status success";
-          statusDiv.textContent =
-            "✅ Download started! Check your downloads folder.";
-          downloadBtn.disabled = false;
-          downloadBtn.textContent = "📥 Download CSV File";
+          statusDiv.textContent = "✅ Download started! File saved to your downloads.";
         }, 1000);
-
-        // Hide status after 5 seconds
-        setTimeout(() => {
-          statusDiv.style.display = "none";
-        }, 5000);
       }
 
-      // Check if server is ready
-      window.addEventListener("load", async () => {
-        try {
-          const response = await fetch("/info");
-          const data = await response.json();
-
-          if (data.status !== "ready") {
-            const statusDiv = document.getElementById("status");
-            statusDiv.className = "status error";
-            statusDiv.textContent =
-              "⚠️ WhatsApp not connected. Please scan QR code first!";
-            document.querySelector(".download-btn").disabled = true;
-          }
-        } catch (error) {
-          console.error("Error checking server status:", error);
-        }
-      });
+      function copyMakeUrl() {
+        const text = document.getElementById("makeUrl").textContent;
+        navigator.clipboard.writeText(text).then(() => {
+          const statusDiv = document.getElementById("status");
+          statusDiv.className = "status success";
+          statusDiv.textContent = "📋 Make.com URL copied to clipboard!";
+          setTimeout(() => { statusDiv.style.display = "none"; }, 3000);
+        });
+      }
     </script>
   </body>
 </html>

@@ -33,12 +33,9 @@ const userSessionSchema = new mongoose.Schema(
   }
 );
 
-// Index for faster queries
+// Indexes for faster queries
 userSessionSchema.index({ userId: 1 });
 userSessionSchema.index({ lastInteraction: 1 });
-
-// Auto-expire sessions after 24 hours of inactivity (optional cleanup)
-userSessionSchema.index({ lastInteraction: 1 }, { expireAfterSeconds: 120 });
 
 const UserSession = mongoose.model("UserSession", userSessionSchema);
 

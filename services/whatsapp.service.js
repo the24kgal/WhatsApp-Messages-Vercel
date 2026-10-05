@@ -3,9 +3,6 @@ const qrcode = require("qrcode-terminal");
 const { MongoStore } = require("wwebjs-mongo");
 const axios = require("axios");
 const {
-  isValidPhoneNumber: validatePhoneNumber,
-} = require("libphonenumber-js");
-const {
   getPuppeteerArgs,
   MAX_RESTART_ATTEMPTS,
 } = require("../config/whatsapp");
@@ -16,6 +13,12 @@ const {
   clearCurrentQR,
 } = require("./qr.service");
 const UserSession = require("../models/UserSession");
+const Contact = require("../models/Contact");
+const {
+  parsePhoneNumberDetails,
+  isValidPhoneNumberGlobal,
+  normalizePhoneNumber,
+} = require("../utils/phoneNumber");
 
 // n8n webhook URL
 const N8N_WEBHOOK_URL =
@@ -969,58 +972,661 @@ function isReady() {
 }
 
 /**
- * Validate if phone number is valid
+ * Validate if phone number is valid globally for any country
  */
-function isValidPhoneNumber(number) {
+function isValidPhoneNumber(number, defaultCountry = null) {
   if (!number) return false;
+  return isValidPhoneNumberGlobal(number, defaultCountry);
+}
+
+// Global state tracking for contact sync operations
+let syncProgressState = {
+  isRunning: false,
+  status: "idle", // 'idle' | 'running' | 'completed' | 'failed'
+  startedAt: null,
+  completedAt: null,
+  progress: {
+    phase: "idle",
+    totalContactsFound: 0,
+    totalChatsFound: 0,
+    processed: 0,
+    saved: 0,
+    updated: 0,
+    errors: 0,
+    percentage: 0,
+  },
+  summary: null,
+  error: null,
+};
+
+/**
+ * Get current sync progress state
+ */
+function getSyncProgress() {
+  return { ...syncProgressState };
+}
+
+/**
+ * Extract all WhatsApp items (contacts, groups, communities) in lightweight chunks
+ * Prevents CDP / Puppeteer timeout when accounts have 3,000+ contacts
+ */
+async function extractAllWhatsAppItemsBatch(options = {}) {
+  if (!whatsappClient || !isClientReady) {
+    throw new Error("WhatsApp client not ready. Please scan QR code first.");
+  }
+
+  const {
+    batchSize = 250,
+    progressCallback = null,
+  } = options;
+
+  const rawContactsMap = new Map();
+  const rawChatsMap = new Map();
+
+  const pupPage = whatsappClient.pupPage;
+
+  if (pupPage) {
+    // 1. EXTRACT CONTACTS IN CHUNKS
+    try {
+      const contactCount = await pupPage.evaluate(() => {
+        return window.Store && window.Store.Contact && window.Store.Contact.models
+          ? window.Store.Contact.models.length
+          : 0;
+      });
+
+      console.log(`📦 Found ${contactCount} contacts in WhatsApp Web Store`);
+      if (progressCallback) {
+        progressCallback({
+          phase: "extracting_contacts",
+          total: contactCount,
+          current: 0,
+        });
+      }
+
+      for (let offset = 0; offset < contactCount; offset += batchSize) {
+        const chunk = await pupPage.evaluate(
+          (start, limit) => {
+            if (
+              !window.Store ||
+              !window.Store.Contact ||
+              !window.Store.Contact.models
+            )
+              return [];
+
+            const models = window.Store.Contact.models.slice(
+              start,
+              start + limit
+            );
+
+            return models.map((c) => ({
+              id: c.id ? c.id._serialized : null,
+              user: c.id ? c.id.user : null,
+              name: c.name || c.formattedTitle || null,
+              pushname: c.pushname || null,
+              verifiedName: c.verifiedName || null,
+              isMyContact: !!c.isMyContact,
+              isBusiness: !!c.isBusiness,
+              isEnterprise: !!c.isEnterprise,
+              isUser: !!c.isUser,
+              isGroup: !!c.isGroup,
+              isBroadcast: !!c.isBroadcast,
+              type:
+                c.type ||
+                (c.isGroup ? "group" : c.isUser ? "individual" : "unknown"),
+            }));
+          },
+          offset,
+          batchSize
+        );
+
+        for (const item of chunk) {
+          if (item && item.id) {
+            rawContactsMap.set(item.id, item);
+          }
+        }
+
+        if (progressCallback) {
+          progressCallback({
+            phase: "extracting_contacts",
+            total: contactCount,
+            current: rawContactsMap.size,
+          });
+        }
+      }
+    } catch (storeContactErr) {
+      console.warn(
+        "⚠️ Chunked Contact store extraction failed, falling back to client.getContacts:",
+        storeContactErr.message
+      );
+      try {
+        const fallbackContacts = await whatsappClient.getContacts();
+        for (const c of fallbackContacts) {
+          const jid = c.id?._serialized || c.id;
+          if (jid) {
+            rawContactsMap.set(jid, {
+              id: jid,
+              user: c.number || c.id?.user,
+              name: c.name,
+              pushname: c.pushname,
+              isMyContact: !!c.isMyContact,
+              isBusiness: !!c.isBusiness,
+              isEnterprise: !!c.isEnterprise,
+              isUser: !!c.isUser,
+              isGroup: !!c.isGroup,
+            });
+          }
+        }
+      } catch (fbErr) {
+        console.error("❌ Fallback getContacts failed:", fbErr.message);
+      }
+    }
+
+    // 2. EXTRACT CHATS (Groups, Communities, Direct Conversations)
+    try {
+      const chatCount = await pupPage.evaluate(() => {
+        return window.Store && window.Store.Chat && window.Store.Chat.models
+          ? window.Store.Chat.models.length
+          : 0;
+      });
+
+      console.log(`💬 Found ${chatCount} chats in WhatsApp Web Store`);
+      if (progressCallback) {
+        progressCallback({
+          phase: "extracting_chats",
+          total: chatCount,
+          current: 0,
+        });
+      }
+
+      for (let offset = 0; offset < chatCount; offset += batchSize) {
+        const chunk = await pupPage.evaluate(
+          (start, limit) => {
+            if (
+              !window.Store ||
+              !window.Store.Chat ||
+              !window.Store.Chat.models
+            )
+              return [];
+
+            const models = window.Store.Chat.models.slice(start, start + limit);
+
+            return models.map((ch) => {
+              const isGroup = !!ch.isGroup;
+              const isParentGroup = !!(
+                ch.isParentGroup ||
+                (ch.groupMetadata && ch.groupMetadata.isParentGroup)
+              );
+              const isCommunity = isParentGroup || !!ch.isCommunity;
+
+              let participants = [];
+              if (
+                ch.groupMetadata &&
+                Array.isArray(ch.groupMetadata.participants)
+              ) {
+                participants = ch.groupMetadata.participants.map((p) => ({
+                  id: p.id ? p.id._serialized : null,
+                  user: p.id ? p.id.user : null,
+                  isAdmin: !!p.isAdmin,
+                  isSuperAdmin: !!p.isSuperAdmin,
+                }));
+              }
+
+              return {
+                id: ch.id ? ch.id._serialized : null,
+                user: ch.id ? ch.id.user : null,
+                name: ch.name || ch.formattedTitle || null,
+                isGroup: isGroup,
+                isCommunity: isCommunity,
+                isParentGroup: isParentGroup,
+                parentGroupId: ch.parentGroup
+                  ? ch.parentGroup._serialized
+                  : null,
+                participants: participants,
+                participantCount:
+                  participants.length ||
+                  (ch.groupMetadata &&
+                    ch.groupMetadata.participants &&
+                    ch.groupMetadata.participants.length) ||
+                  0,
+                description: ch.groupMetadata
+                  ? ch.groupMetadata.desc || null
+                  : null,
+              };
+            });
+          },
+          offset,
+          batchSize
+        );
+
+        for (const item of chunk) {
+          if (item && item.id) {
+            rawChatsMap.set(item.id, item);
+          }
+        }
+
+        if (progressCallback) {
+          progressCallback({
+            phase: "extracting_chats",
+            total: chatCount,
+            current: rawChatsMap.size,
+          });
+        }
+      }
+    } catch (storeChatErr) {
+      console.warn("⚠️ Chunked Chat store extraction failed:", storeChatErr.message);
+    }
+  } else {
+    const fallbackContacts = await whatsappClient.getContacts();
+    for (const c of fallbackContacts) {
+      const jid = c.id?._serialized || c.id;
+      if (jid) {
+        rawContactsMap.set(jid, {
+          id: jid,
+          user: c.number || c.id?.user,
+          name: c.name,
+          pushname: c.pushname,
+          isMyContact: !!c.isMyContact,
+          isBusiness: !!c.isBusiness,
+          isEnterprise: !!c.isEnterprise,
+          isUser: !!c.isUser,
+          isGroup: !!c.isGroup,
+        });
+      }
+    }
+  }
+
+  return {
+    rawContacts: Array.from(rawContactsMap.values()),
+    rawChats: Array.from(rawChatsMap.values()),
+  };
+}
+
+/**
+ * Synchronize all WhatsApp contacts, groups, communities, and group participants into MongoDB
+ * Automatically segregates by location and business
+ */
+async function syncAllContactsToDatabase(options = {}) {
+  if (syncProgressState.isRunning) {
+    return {
+      success: false,
+      message: "Sync is already in progress",
+      progress: syncProgressState,
+    };
+  }
+
+  const startTime = new Date();
+  syncProgressState = {
+    isRunning: true,
+    status: "running",
+    startedAt: startTime,
+    completedAt: null,
+    progress: {
+      phase: "starting",
+      totalContactsFound: 0,
+      totalChatsFound: 0,
+      processed: 0,
+      saved: 0,
+      updated: 0,
+      errors: 0,
+      percentage: 5,
+    },
+    summary: null,
+    error: null,
+  };
 
   try {
-    const phoneStr = String(number).trim();
-    if (!phoneStr) return false;
+    console.log("🚀 Starting batch WhatsApp contacts & chats synchronization...");
 
-    if (validatePhoneNumber(`+${phoneStr}`)) {
-      return true;
+    // Extract items in safe batches
+    const { rawContacts, rawChats } = await extractAllWhatsAppItemsBatch({
+      batchSize: 250,
+      progressCallback: (info) => {
+        if (info.phase === "extracting_contacts") {
+          syncProgressState.progress.phase = "extracting_contacts";
+          syncProgressState.progress.totalContactsFound = info.total;
+          syncProgressState.progress.percentage = Math.min(
+            35,
+            Math.round((info.current / (info.total || 1)) * 30) + 5
+          );
+        } else if (info.phase === "extracting_chats") {
+          syncProgressState.progress.phase = "extracting_chats";
+          syncProgressState.progress.totalChatsFound = info.total;
+          syncProgressState.progress.percentage = Math.min(
+            60,
+            Math.round((info.current / (info.total || 1)) * 25) + 35
+          );
+        }
+      },
+    });
+
+    syncProgressState.progress.phase = "processing_and_segregating";
+    syncProgressState.progress.percentage = 65;
+
+    // Contact documents map by JID to deduplicate and merge
+    const finalContactsMap = new Map();
+
+    // 1. Process Raw Contacts (Individual contacts)
+    for (const c of rawContacts) {
+      const jid = c.id;
+      if (!jid || jid === "status@broadcast") continue;
+
+      if (jid.endsWith("@c.us") || c.isUser) {
+        const rawNumber = c.user || jid.replace("@c.us", "");
+        const phoneDetails = parsePhoneNumberDetails(rawNumber);
+
+        const countryCode = phoneDetails.countryCode || "UNKNOWN";
+        const country = phoneDetails.country || "Unknown";
+        const callingCode = phoneDetails.callingCode;
+        const number = phoneDetails.number || rawNumber;
+        const formattedNumber = phoneDetails.international;
+
+        const displayName =
+          c.name || c.verifiedName || c.pushname || (number ? `+${number}` : "Unknown");
+
+        finalContactsMap.set(jid, {
+          jid,
+          number,
+          formattedNumber,
+          name: displayName,
+          pushname: c.pushname || null,
+          savedName: c.isMyContact ? (c.name || null) : null,
+          type: "individual",
+          isMyContact: !!c.isMyContact,
+          isBusiness: !!c.isBusiness,
+          isEnterprise: !!c.isEnterprise,
+          isUser: true,
+          isGroup: false,
+          isCommunity: false,
+          countryCode,
+          country,
+          callingCode,
+          location: {
+            country,
+            countryCode,
+            callingCode,
+          },
+          source: c.isMyContact ? "contact_book" : "chat",
+          lastSyncedAt: new Date(),
+        });
+      }
     }
 
-    if (validatePhoneNumber(phoneStr)) {
-      return true;
+    // 2. Process Raw Chats (Groups, Communities, and Group Participants)
+    for (const ch of rawChats) {
+      const jid = ch.id;
+      if (!jid || jid === "status@broadcast") continue;
+
+      if (ch.isGroup) {
+        const isCommunity = !!(ch.isCommunity || ch.isParentGroup);
+        const chatType = isCommunity ? "community" : "group";
+
+        finalContactsMap.set(jid, {
+          jid,
+          number: null,
+          formattedNumber: null,
+          name: ch.name || (isCommunity ? "Unnamed Community" : "Unnamed Group"),
+          pushname: null,
+          savedName: null,
+          type: chatType,
+          isMyContact: false,
+          isBusiness: false,
+          isEnterprise: false,
+          isUser: false,
+          isGroup: true,
+          isCommunity: isCommunity,
+          countryCode: isCommunity ? "COMMUNITY" : "GROUP",
+          country: isCommunity ? "Community" : "Group Chat",
+          callingCode: null,
+          location: {
+            country: isCommunity ? "Community" : "Group Chat",
+            countryCode: isCommunity ? "COMMUNITY" : "GROUP",
+            callingCode: null,
+          },
+          source: isCommunity ? "community" : "chat",
+          groupInfo: {
+            subject: ch.name || null,
+            description: ch.description || null,
+            participantCount: ch.participantCount || 0,
+            isParentGroup: isCommunity,
+            parentGroupId: ch.parentGroupId || null,
+          },
+          lastSyncedAt: new Date(),
+        });
+
+        // 3. Process Group Participants (Unsaved Leads / Members)
+        if (Array.isArray(ch.participants)) {
+          for (const p of ch.participants) {
+            const pJid = p.id;
+            if (!pJid || !pJid.endsWith("@c.us")) continue;
+
+            // If participant is not yet in contacts map, add them as an unsaved individual
+            if (!finalContactsMap.has(pJid)) {
+              const rawNumber = p.user || pJid.replace("@c.us", "");
+              const phoneDetails = parsePhoneNumberDetails(rawNumber);
+              const number = phoneDetails.number || rawNumber;
+              const countryCode = phoneDetails.countryCode || "UNKNOWN";
+              const country = phoneDetails.country || "Unknown";
+
+              finalContactsMap.set(pJid, {
+                jid: pJid,
+                number,
+                formattedNumber: phoneDetails.international,
+                name: phoneDetails.international || (number ? `+${number}` : "Unknown"),
+                pushname: null,
+                savedName: null,
+                type: "individual",
+                isMyContact: false, // Unsaved
+                isBusiness: false,
+                isEnterprise: false,
+                isUser: true,
+                isGroup: false,
+                isCommunity: false,
+                countryCode,
+                country,
+                callingCode: phoneDetails.callingCode,
+                location: {
+                  country,
+                  countryCode,
+                  callingCode: phoneDetails.callingCode,
+                },
+                source: "group_participant",
+                lastSyncedAt: new Date(),
+              });
+            }
+          }
+        }
+      }
     }
 
-    if (validatePhoneNumber(phoneStr, "PK")) {
-      return true;
+    const contactsList = Array.from(finalContactsMap.values());
+    console.log(
+      `📊 Prepared ${contactsList.length} unique items for database upsert`
+    );
+
+    syncProgressState.progress.phase = "saving_to_mongodb";
+    syncProgressState.progress.percentage = 75;
+
+    // 4. BULK UPSERT INTO MONGODB IN BATCHES OF 500
+    const bulkChunkSize = 500;
+    let totalSaved = 0;
+    let totalUpdated = 0;
+
+    for (let i = 0; i < contactsList.length; i += bulkChunkSize) {
+      const slice = contactsList.slice(i, i + bulkChunkSize);
+      const bulkOps = slice.map((item) => ({
+        updateOne: {
+          filter: { jid: item.jid },
+          update: { $set: item },
+          upsert: true,
+        },
+      }));
+
+      const res = await Contact.bulkWrite(bulkOps, { ordered: false });
+      totalSaved += res.upsertedCount || 0;
+      totalUpdated += res.modifiedCount || 0;
+
+      const currentProgress = Math.min(
+        95,
+        75 + Math.round(((i + slice.length) / contactsList.length) * 20)
+      );
+      syncProgressState.progress.percentage = currentProgress;
+      syncProgressState.progress.processed = i + slice.length;
+      syncProgressState.progress.saved = totalSaved;
+      syncProgressState.progress.updated = totalUpdated;
     }
 
-    return false;
+    // 5. COMPUTE SEGREGATION SUMMARY
+    let businessCount = 0;
+    let regularCount = 0;
+    let savedCount = 0;
+    let unsavedCount = 0;
+    let individualCount = 0;
+    let groupCount = 0;
+    let communityCount = 0;
+    const countryMap = new Map();
+
+    for (const item of contactsList) {
+      if (item.type === "individual") {
+        individualCount++;
+        if (item.isBusiness) businessCount++;
+        else regularCount++;
+
+        if (item.isMyContact) savedCount++;
+        else unsavedCount++;
+
+        const cName = item.country || "Unknown";
+        countryMap.set(cName, (countryMap.get(cName) || 0) + 1);
+      } else if (item.type === "group") {
+        groupCount++;
+      } else if (item.type === "community") {
+        communityCount++;
+      }
+    }
+
+    const topCountries = Array.from(countryMap.entries())
+      .map(([country, count]) => ({ country, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+
+    const endTime = new Date();
+    const durationSeconds = (endTime - startTime) / 1000;
+
+    const summary = {
+      totalFound: contactsList.length,
+      savedToDatabase: totalSaved,
+      updatedInDatabase: totalUpdated,
+      segregation: {
+        individuals: individualCount,
+        groups: groupCount,
+        communities: communityCount,
+        savedContacts: savedCount,
+        unsavedContacts: unsavedCount,
+        businessContacts: businessCount,
+        regularContacts: regularCount,
+        totalCountries: countryMap.size,
+        topCountries,
+      },
+      durationSeconds,
+      completedAt: endTime,
+    };
+
+    syncProgressState.isRunning = false;
+    syncProgressState.status = "completed";
+    syncProgressState.completedAt = endTime;
+    syncProgressState.progress.phase = "completed";
+    syncProgressState.progress.percentage = 100;
+    syncProgressState.summary = summary;
+
+    console.log("✅ Contact sync completed successfully!");
+    console.log(
+      `📊 Summary: ${individualCount} individuals (${businessCount} business, ${savedCount} saved, ${unsavedCount} unsaved), ${groupCount} groups, ${communityCount} communities in ${durationSeconds}s`
+    );
+
+    return {
+      success: true,
+      message: "WhatsApp contacts synchronized successfully",
+      summary,
+    };
   } catch (error) {
-    return false;
+    console.error("❌ Error during contacts synchronization:", error);
+    syncProgressState.isRunning = false;
+    syncProgressState.status = "failed";
+    syncProgressState.error = error.message;
+    syncProgressState.completedAt = new Date();
+    throw error;
   }
 }
 
 /**
- * Get all contacts from WhatsApp with filtering options
+ * Get all contacts with filtering options
+ * Reads from MongoDB database for instant zero-timeout response,
+ * or falls back to live safe batch extraction
  */
 async function getAllContacts(options = {}) {
-  if (!whatsappClient || !isClientReady) {
-    throw new Error("WhatsApp client not ready");
-  }
-
   const {
     savedOnly = false,
     excludeUnknown = false,
     validateNumber = true,
+    country = null,
+    countryCode = null,
+    isBusiness = null,
+    type = null,
+    source = "db", // 'db' or 'live'
   } = options;
 
-  try {
-    const contacts = await whatsappClient.getContacts();
+  // 1. If source is 'db' (default), query MongoDB for sub-100ms response
+  if (source === "db") {
+    const filter = {};
 
-    const formattedContacts = contacts
+    if (savedOnly) filter.isMyContact = true;
+    if (isBusiness === true || isBusiness === "true") filter.isBusiness = true;
+    if (isBusiness === false || isBusiness === "false") filter.isBusiness = false;
+    if (country) filter.country = new RegExp(`^${country}$`, "i");
+    if (countryCode) filter.countryCode = countryCode.toUpperCase();
+    if (type) filter.type = type;
+    else filter.type = "individual"; // Default to individuals
+
+    if (excludeUnknown) {
+      filter.name = { $nin: ["Unknown", null, ""] };
+    }
+
+    const contacts = await Contact.find(filter)
+      .sort({ name: 1 })
+      .lean();
+
+    if (contacts.length > 0) {
+      return contacts.map((c) => ({
+        name: c.name || "Unknown",
+        number: c.number,
+        formattedNumber: c.formattedNumber,
+        id: c.jid,
+        isMyContact: c.isMyContact,
+        isBusiness: c.isBusiness,
+        type: c.type,
+        country: c.country,
+        countryCode: c.countryCode,
+        callingCode: c.callingCode,
+        source: c.source,
+      }));
+    }
+  }
+
+  // 2. If 'live' requested or DB is empty, run chunked live extraction
+  if (!whatsappClient || !isClientReady) {
+    throw new Error("WhatsApp client not ready. Please scan QR code or trigger /contacts/sync.");
+  }
+
+  try {
+    const { rawContacts } = await extractAllWhatsAppItemsBatch({ batchSize: 250 });
+
+    const formattedContacts = rawContacts
       .filter((contact) => {
         if (
           !contact.isUser ||
           contact.isGroup ||
           contact.isBroadcast ||
-          contact.id._serialized === "status@broadcast" ||
-          !contact.id._serialized.endsWith("@c.us")
+          contact.id === "status@broadcast" ||
+          !contact.id.endsWith("@c.us")
         ) {
           return false;
         }
@@ -1030,7 +1636,7 @@ async function getAllContacts(options = {}) {
         }
 
         if (validateNumber) {
-          const number = contact.number || contact.id.user;
+          const number = contact.user || contact.id.replace("@c.us", "");
           if (!isValidPhoneNumber(number)) {
             return false;
           }
@@ -1038,16 +1644,33 @@ async function getAllContacts(options = {}) {
 
         return true;
       })
-      .map((contact) => ({
-        name: contact.name || contact.pushname || "Unknown",
-        number: contact.number || contact.id.user,
-        id: contact.id._serialized,
-        isMyContact: contact.isMyContact,
-        isBusiness: contact.isBusiness,
-        shortName: contact.shortName || null,
-      }))
+      .map((contact) => {
+        const rawNumber = contact.user || contact.id.replace("@c.us", "");
+        const details = parsePhoneNumberDetails(rawNumber);
+
+        return {
+          name: contact.name || contact.pushname || "Unknown",
+          number: details.number || rawNumber,
+          formattedNumber: details.international,
+          id: contact.id,
+          isMyContact: contact.isMyContact,
+          isBusiness: contact.isBusiness,
+          country: details.country,
+          countryCode: details.countryCode,
+          callingCode: details.callingCode,
+        };
+      })
       .filter((contact) => {
         if (excludeUnknown && contact.name === "Unknown") {
+          return false;
+        }
+        if (country && contact.country?.toLowerCase() !== country.toLowerCase()) {
+          return false;
+        }
+        if (countryCode && contact.countryCode !== countryCode.toUpperCase()) {
+          return false;
+        }
+        if (isBusiness !== null && contact.isBusiness !== (isBusiness === "true" || isBusiness === true)) {
           return false;
         }
         return true;
@@ -1060,7 +1683,7 @@ async function getAllContacts(options = {}) {
 
     return formattedContacts;
   } catch (error) {
-    console.error("❌ Error fetching contacts:", error.message);
+    console.error("❌ Error fetching live contacts:", error.message);
     throw error;
   }
 }
@@ -1073,4 +1696,8 @@ module.exports = {
   getClient,
   isReady,
   getAllContacts,
+  extractAllWhatsAppItemsBatch,
+  syncAllContactsToDatabase,
+  getSyncProgress,
+  isValidPhoneNumber,
 };

@@ -74,6 +74,10 @@ function startServer() {
       `🔄 Reset session: POST http://localhost:${PORT}/reset-session`
     );
     console.log(`📇 Get contacts: http://localhost:${PORT}/contacts`);
+    console.log(`🔄 Batch Sync Contacts: POST http://localhost:${PORT}/contacts/sync`);
+    console.log(`📊 Sync Status: http://localhost:${PORT}/contacts/sync/status`);
+    console.log(`🗄️  Database Contacts (Make.com): http://localhost:${PORT}/contacts/database`);
+    console.log(`📍 Location & Business Segregation: http://localhost:${PORT}/contacts/segregation`);
     console.log(`📊 Contact stats: http://localhost:${PORT}/contacts/stats`);
     console.log(`📥 Export CSV: http://localhost:${PORT}/export.html`);
     console.log(
